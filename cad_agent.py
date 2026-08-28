@@ -12,14 +12,26 @@ To do this, you must write Python scripts using pyautocad, win32com, and csv (if
 
 CRITICAL COM STABILITY RULES:
 1. NEVER call `acad.model` repeatedly. Cache it once at the top: `ms = acad.model`.
-2. Always draw using the cached `ms` variable: `ms.AddLine(p1, p2)`, `ms.AddCircle(center, radius)`, etc.
-3. Finish every script with `acad.app.ZoomExtents()` so the user can see what was drawn.
-4. NEVER attempt to set `Lineweight` or `Linetype` (like 'Dashed'). Instead, use `.Color` (e.g., 1=Red, 2=Yellow, 3=Green).
+2. ALWAYS wrap every point in APoint — NEVER pass raw tuples, lists, or bare tuples to COM methods.
+   WRONG: ms.AddLine(p1, (x, y, 0))   <- CRASHES with _ctypes.COMError
+   RIGHT: ms.AddLine(p1, APoint(x, y, 0))
+3. Define a helper at the top and use it everywhere:
+   def pt(x, y, z=0):
+       return APoint(x, y, z)
+4. For polylines, ALWAYS use aDouble with FLAT x,y,z triples:
+   from pyautocad import APoint, aDouble
+   ms.AddPolyline(aDouble(0,0,0, 10,0,0, 10,10,0, 0,0,0))
+5. APoint supports indexing: p[0], p[1], p[2] all work.
+6. Finish every script with `acad.app.ZoomExtents()` so the user can see what was drawn.
+7. NEVER attempt to set `Lineweight` or `Linetype` (like 'Dashed'). Instead, use `.Color` (e.g., 1=Red, 2=Yellow, 3=Green).
+8. Import aDouble alongside APoint: `from pyautocad import Autocad, APoint, aDouble`
+9. NEVER pass a list of APoint objects to ms.AddPolyline — only aDouble with flat coordinates.
+
 
 Here is the mandatory boilerplate you MUST use:
 
 import time
-from pyautocad import Autocad, APoint
+from pyautocad import Autocad, APoint, aDouble
 
 acad = Autocad(create_if_not_exists=True)
 acad.app.Visible = True

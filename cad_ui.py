@@ -1,289 +1,106 @@
-import sys
-import os
-import subprocess
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTextEdit, QPushButton, QLabel, QRadioButton, QButtonGroup, QFrame, QSplitter
-)
-from PyQt6.QtGui import QFont, QColor, QPalette
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QProcess
+import time
+from pyautocad import Autocad, APoint, aDouble
 
-from cad_agent import get_ai_response
+acad = Autocad(create_if_not_exists=True)
+acad.app.Visible = True
 
-SKETCHUP_EXE = r"C:\Program Files\SketchUp\SketchUp 2025\SketchUp.exe"
+for _ in range(10):
+    try:
+        if acad.app.Documents.Count == 0:
+            acad.app.Documents.Add()
+        _ = acad.app.ActiveDocument.ModelSpace
+        break
+    except Exception:
+        time.sleep(0.5)
 
-# --- Color Palette ---
-BG_COLOR = "#0a0e14"
-PANEL_COLOR = "#11161d"
-BORDER_COLOR = "#1f2937"
-ACCENT_COLOR = "#00d4ff"
-TEXT_COLOR = "#e5e7eb"
-MUTED_TEXT = "#6b7280"
+ms = acad.model
 
-class AEC_Orchestrator(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("AEC Orchestrator — Generative CAD Bridge")
-        self.setMinimumSize(1000, 700)
-        self.setStyleSheet(f"background-color: {BG_COLOR}; color: {TEXT_COLOR};")
+# Plot dimensions (in feet)
+plot_width = 50
+plot_depth = 36
+floor_height = 10
 
-        # Main Layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(15)
+# FIX 2: Added 'z' parameter so the AI's 3D coordinates don't crash
+def pt(x, y, z=0):
+    return APoint(x, y, z)
 
-        # --- HEADER ---
-        header = QLabel("◈ AEC ORCHESTRATOR")
-        header.setFont(QFont("Courier New", 12, QFont.Weight.Bold))
-        header.setStyleSheet(f"color: {ACCENT_COLOR}; padding-bottom: 5px;")
-        main_layout.addWidget(header)
+# FIX 1: Use aDouble() and flat coordinates for AddPolyline
+boundary = ms.AddPolyline(aDouble(
+    0, 0, 0,
+    plot_width, 0, 0,
+    plot_width, plot_depth, 0,
+    0, plot_depth, 0,
+    0, 0, 0
+))
+boundary.Closed = True
+boundary.Color = 1  # Red
 
-        # --- SPLITTER (Left: Input/Controls, Right: Code/Output) ---
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_layout.addWidget(splitter)
+wall_thickness = 0.5
 
-        # ==========================================
-        # LEFT PANEL (Controls & Prompt)
-        # ==========================================
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 10, 0)
+outer_walls = [
+    [pt(0, 0), pt(0, plot_depth)],
+    [pt(plot_width, 0), pt(plot_width, plot_depth)],
+    [pt(0, 0), pt(plot_width, 0)],
+    [pt(0, plot_depth), pt(plot_width, plot_depth)]
+]
 
-        # 1. Target Software Selector
-        target_label = QLabel("TARGET SOFTWARE:")
-        target_label.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
-        left_layout.addWidget(target_label)
+inner_walls_gf = [
+    [pt(10, 10), pt(40, 10)], [pt(10, 20), pt(40, 20)], [pt(10, 30), pt(40, 30)],
+    [pt(10, 10), pt(10, 30)], [pt(20, 10), pt(20, 20)], [pt(30, 10), pt(30, 20)],
+    [pt(40, 10), pt(40, 30)], [pt(25, 20), pt(25, 30)], [pt(35, 20), pt(35, 30)]
+]
 
-        self.btn_group = QButtonGroup(self)
-        targets = [("AutoCAD (2D)", "cad"), ("SketchUp (Ruby)", "sketchup"), ("Rhino 8 (3D)", "rhino")]
+inner_walls_ff = [
+    [pt(10, 10), pt(40, 10)], [pt(10, 20), pt(40, 20)], [pt(10, 30), pt(40, 30)],
+    [pt(10, 10), pt(10, 30)], [pt(18, 10), pt(18, 20)], [pt(32, 10), pt(32, 20)],
+    [pt(40, 10), pt(40, 30)], [pt(25, 20), pt(25, 30)], [pt(35, 20), pt(35, 30)]
+]
 
-        radio_layout = QHBoxLayout()
-        for text, value in targets:
-            rb = QRadioButton(text)
-            rb.setFont(QFont("Courier New", 9))
-            rb.setObjectName(value)
-            if value == "cad":
-                rb.setChecked(True)
-            self.btn_group.addButton(rb)
-            radio_layout.addWidget(rb)
-        left_layout.addLayout(radio_layout)
+# Draw ground floor
+for wall in outer_walls + inner_walls_gf:
+    line = ms.AddLine(wall[0], wall[1])
+    line.Color = 2  # Yellow
 
-        # 2. Natural Language Prompt
-        left_layout.addSpacing(15)
-        prompt_label = QLabel("GENERATIVE PROMPT:")
-        prompt_label.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
-        left_layout.addWidget(prompt_label)
+# Draw first floor
+for wall in outer_walls + inner_walls_ff:
+    start = pt(wall[0][0], wall[0][1], floor_height)
+    end = pt(wall[1][0], wall[1][1], floor_height)
+    line = ms.AddLine(start, end)
+    line.Color = 3  # Green
 
-        self.prompt_input = QTextEdit()
-        self.prompt_input.setPlaceholderText("e.g., Draw a 5000x5000 floor plan with a 1000x1000 square inside it...")
-        self.prompt_input.setFont(QFont("Courier New", 10))
-        self.prompt_input.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {PANEL_COLOR};
-                border: 1px solid {BORDER_COLOR};
-                border-radius: 5px;
-                padding: 10px;
-            }}
-            QTextEdit:focus {{ border: 1px solid {ACCENT_COLOR}; }}
-        """)
-        left_layout.addWidget(self.prompt_input)
+# FIX 1: Flat array of doubles for the 3D stairs Polyline
+stairs_width = 3
+stairs = ms.AddPolyline(aDouble(
+    12, 10, 0,
+    12 + stairs_width, 10, 0,
+    12 + stairs_width, 10, floor_height,
+    12, 10, floor_height,
+    12, 10, 0
+))
+stairs.Closed = True
+stairs.Color = 5  # Blue
 
-        # 3. Generate Button
-        self.btn_generate = QPushButton("▸ GENERATE SCRIPT")
-        self.btn_generate.setFixedHeight(40)
-        self.btn_generate.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
-        self.btn_generate.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {PANEL_COLOR}; color: {ACCENT_COLOR};
-                border: 1px solid {ACCENT_COLOR}; border-radius: 5px;
-            }}
-            QPushButton:hover {{ background-color: #001f2e; }}
-        """)
-        self.btn_generate.clicked.connect(self.simulate_ai_generation)
-        left_layout.addWidget(self.btn_generate)
+labels_gf = [
+    ("Living", pt(25, 5)), ("Bedroom 1", pt(15, 15)), ("Bedroom 2", pt(25, 15)),
+    ("Bedroom 3", pt(35, 15)), ("Kitchen", pt(15, 25)), ("Dining", pt(25, 25)),
+    ("Common Bath", pt(35, 25))
+]
 
-        splitter.addWidget(left_panel)
+labels_ff = [
+    ("Master Bedroom", pt(22, 15)), ("Bedroom 4", pt(13, 15)), ("Bedroom 5", pt(37, 15)),
+    ("Study", pt(15, 25)), ("Family Lounge", pt(25, 25)), ("Bath 1", pt(30, 25)),
+    ("Bath 2", pt(40, 25))
+]
 
-        # ==========================================
-        # RIGHT PANEL (Code Editor & Execution)
-        # ==========================================
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(10, 0, 0, 0)
+for text, point in labels_gf:
+    txt = ms.AddText(text, point, 2.5)
+    txt.Color = 2  # Yellow
 
-        # 1. Code Editor
-        code_label = QLabel("GENERATED SCRIPT (Editable):")
-        code_label.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
-        right_layout.addWidget(code_label)
+for text, point in labels_ff:
+    txt = ms.AddText(text, pt(point[0], point[1], floor_height), 2.5)
+    txt.Color = 3  # Green
 
-        self.code_editor = QTextEdit()
-        self.code_editor.setFont(QFont("Courier New", 9))
-        self.code_editor.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {PANEL_COLOR}; color: #a6accd;
-                border: 1px solid {BORDER_COLOR}; border-radius: 5px;
-                padding: 10px;
-            }}
-        """)
-        right_layout.addWidget(self.code_editor)
+ms.AddText("GROUND FLOOR", pt(25, 34), 3.5).Color = 2
+ms.AddText("FIRST FLOOR", pt(25, 34, floor_height), 3.5).Color = 3
 
-        # 2. Execute Button
-        self.btn_execute = QPushButton("⚡ BUILD IN SOFTWARE")
-        self.btn_execute.setFixedHeight(40)
-        self.btn_execute.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
-        self.btn_execute.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #00aa55; color: #ffffff;
-                border: none; border-radius: 5px;
-            }}
-            QPushButton:hover {{ background-color: #00c860; }}
-        """)
-        self.btn_execute.clicked.connect(self.execute_script)
-        right_layout.addWidget(self.btn_execute)
-
-        # 3. Execution Output Console
-        output_label = QLabel("EXECUTION OUTPUT:")
-        output_label.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
-        right_layout.addWidget(output_label)
-
-        self.output_console = QTextEdit()
-        self.output_console.setReadOnly(True)
-        self.output_console.setFont(QFont("Courier New", 9))
-        self.output_console.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: #05080c; color: #9ca3af;
-                border: 1px solid {BORDER_COLOR}; border-radius: 5px;
-                padding: 10px;
-            }}
-        """)
-        right_layout.addWidget(self.output_console)
-
-        splitter.addWidget(right_panel)
-        splitter.setSizes([400, 600])
-
-    # --- Logic ---
-    def simulate_ai_generation(self):
-        """Query the real LLM fallback chain (cad_agent) in a background thread."""
-        prompt = self.prompt_input.toPlainText().strip()
-        if not prompt:
-            self.code_editor.setPlainText("# [!] Enter a prompt first.")
-            return
-
-        self.btn_generate.setEnabled(False)
-        self.btn_generate.setText("◌ GENERATING...")
-        self.code_editor.setPlainText("[*] Asking AI models (fallback chain active)...")
-
-        self.worker = AIWorker(prompt)
-        self.worker.finished_signal.connect(self.on_ai_finished)
-        self.worker.error_signal.connect(self.on_ai_error)
-        self.worker.start()
-
-    def on_ai_finished(self, response):
-        """Extract the code block from the AI response and show it in the editor."""
-        self.btn_generate.setEnabled(True)
-        self.btn_generate.setText("▸ GENERATE SCRIPT")
-
-        code = None
-        if "```python" in response:
-            code = response.split("```python")[1].split("```")[0].strip()
-        elif "```ruby" in response:
-            code = response.split("```ruby")[1].split("```")[0].strip()
-        elif "```" in response:
-            code = response.split("```")[1].split("```")[0].strip()
-
-        if code:
-            self.code_editor.setPlainText(code)
-        else:
-            self.code_editor.setPlainText(f"# [!] Could not extract code from AI response:\n# {response[:300]}")
-
-    def on_ai_error(self, error):
-        self.btn_generate.setEnabled(True)
-        self.btn_generate.setText("▸ GENERATE SCRIPT")
-        self.code_editor.setPlainText(f"# [!] AI generation failed:\n# {error}")
-
-    def execute_script(self):
-        """Save the code and run it, streaming output into the console."""
-        target = self.btn_group.checkedButton().objectName()
-        code = self.code_editor.toPlainText().strip()
-
-        if not code:
-            return
-
-        # Guard: refuse to run raw prompt text (no code structure) as a script
-        if not any(token in code for token in ("import", "def ", "print", "puts", "entities", "model")):
-            self.output_console.setPlainText(
-                "[!] That doesn't look like generated code.\n"
-                "    Click 'GENERATE SCRIPT' first, then 'BUILD IN SOFTWARE'."
-            )
-            return
-
-        self.btn_execute.setEnabled(False)
-        self.btn_execute.setText("◌ RUNNING...")
-        self.output_console.setPlainText(f"[*] Building in {target.upper()}...\n")
-
-        script_file = {"cad": "run_cad.py", "rhino": "run_rhino.py", "sketchup": "run_sketchup.rb"}[target]
-        with open(script_file, "w") as f:
-            f.write(code)
-
-        if target == "sketchup":
-            # SketchUp must be launched as an app with the Ruby startup file
-            try:
-                subprocess.Popen([SKETCHUP_EXE, "-RubyStartup", script_file])
-                self.output_console.append("[+] SketchUp launched with script. Check the SketchUp window.")
-            except Exception as e:
-                self.output_console.append(f"[!] Failed to launch SketchUp: {e}\n(Update SKETCHUP_EXE path if needed)")
-            self._reset_execute_button()
-            return
-
-        # Python targets (cad / rhino): run via QProcess, stream output live
-        self.runner = QProcess(self)
-        self.runner.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        self.runner.readyReadStandardOutput.connect(self._on_runner_output)
-        self.runner.finished.connect(self._on_runner_finished)
-        self.runner.start(sys.executable, [script_file])
-
-    def _on_runner_output(self):
-        text = bytes(self.runner.readAllStandardOutput()).decode(errors="replace")
-        self.output_console.append(text)
-
-    def _on_runner_finished(self, exit_code, _status):
-        if exit_code == 0:
-            self.output_console.append("\n[+] Build finished successfully.")
-        else:
-            self.output_console.append(
-                f"\n[!] Build failed with exit code {exit_code}. "
-                "Make sure the CAD software is installed and running."
-            )
-        self._reset_execute_button()
-
-    def _reset_execute_button(self):
-        self.btn_execute.setEnabled(True)
-        self.btn_execute.setText("⚡ BUILD IN SOFTWARE")
-
-class AIWorker(QThread):
-    """Runs the LLM fallback chain off the UI thread."""
-    finished_signal = pyqtSignal(str)
-    error_signal = pyqtSignal(str)
-
-    def __init__(self, prompt):
-        super().__init__()
-        self.prompt = prompt
-
-    def run(self):
-        try:
-            response = get_ai_response(self.prompt)
-            if response is None:
-                self.error_signal.emit("All AI providers failed.")
-            else:
-                self.finished_signal.emit(response)
-        except Exception as e:
-            self.error_signal.emit(str(e))
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = AEC_Orchestrator()
-    window.show()
-    sys.exit(app.exec())
+acad.app.ZoomExtents()
