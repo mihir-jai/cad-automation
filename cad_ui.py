@@ -10,6 +10,7 @@ from PyQt6.QtGui import QFont, QColor, QPalette
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QProcess
 
 from cad_agent import get_ai_response, fix_code_with_error
+from build_cad import cad_env, rhino_env, sketchup_env
 
 SKETCHUP_EXE = r"C:\Program Files\SketchUp\SketchUp 2025\SketchUp.exe"
 
@@ -264,7 +265,7 @@ class AEC_Orchestrator(QMainWindow):
             return
 
         # Guard: refuse to run raw prompt text (no code structure) as a script
-        if not any(token in code for token in ("import", "def ", "print", "puts", "entities", "model", "rs.")):
+        if not any(token in code for token in ("import", "def ", "print", "puts", "entities", "model", "rs.", "d.")):
             self.output_console.setPlainText(
                 "[!] That doesn't look like generated code.\n"
                 "    Click 'GENERATE SCRIPT' first, then 'BUILD IN SOFTWARE'."
@@ -276,7 +277,20 @@ class AEC_Orchestrator(QMainWindow):
         self.output_console.setPlainText(f"[*] Building in {target.upper()}...\n")
 
         script_file = {"cad": "run_cad.py", "rhino": "run_rhino.py", "sketchup": "run_sketchup.rb"}[target]
-        with open(script_file, "w") as f:
+
+        # Prepend the fresh execution template (connection boilerplate +
+        # ArchitecturalDrafter class) so `d`, `ms`, and `acad` always exist —
+        # unless the editor code is already a complete standalone script.
+        templates = {"cad": cad_env, "rhino": rhino_env, "sketchup": sketchup_env}
+        standalone_markers = {
+            "cad": ("class ArchitecturalDrafter", "Autocad("),
+            "rhino": ("win32com", "Rhino.Application"),
+            "sketchup": ("Sketchup.active_model",),
+        }
+        if not any(marker in code for marker in standalone_markers[target]):
+            code = templates[target].strip() + "\n\n" + code + "\n"
+
+        with open(script_file, "w", encoding="utf-8") as f:
             f.write(code)
 
         if target == "sketchup":
