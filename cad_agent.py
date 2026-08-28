@@ -1,8 +1,20 @@
+import os
 import sys
 import subprocess
 
 from build_cad import cad_env, rhino_env, sketchup_env
 from llm_router import get_ai_response as route_llm
+
+STANDARDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aec_drafting_standards.md")
+
+def load_drafting_standards():
+    """Load the permanent architectural education (Neufert + NBC rules)."""
+    try:
+        with open(STANDARDS_FILE, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"[!] Warning: {STANDARDS_FILE} not found — drafting standards disabled.")
+        return ""
 
 CAD_PROMPT = """
 You are an expert architectural AI assistant. Your job is to interact with AutoCAD via Python. 
@@ -186,8 +198,17 @@ inside a standard markdown ruby code block (```ruby ... ```). Do not explain the
 SYSTEM_PROMPTS = {"cad": CAD_PROMPT, "rhino": RHINO_PROMPT, "sketchup": SKETCHUP_PROMPT}
 
 def get_ai_response(user_input, target="cad"):
-    """Query AI providers via the direct HTTP router (llm_router.py)."""
-    return route_llm(user_input, SYSTEM_PROMPTS.get(target, CAD_PROMPT))
+    """Query AI providers via the direct HTTP router (llm_router.py).
+    The aec_drafting_standards.md knowledge base is appended to every request."""
+    standards = load_drafting_standards()
+    base_prompt = SYSTEM_PROMPTS.get(target, CAD_PROMPT)
+    if standards:
+        base_prompt += (
+            "\n\n=== MANDATORY ARCHITECTURAL STANDARDS (Neufert + NBC 2016) ===\n"
+            "You MUST apply these dimensions and rules to every floor plan you draw:\n\n"
+            + standards
+        )
+    return route_llm(user_input, base_prompt)
 
 def fix_code_with_error(code, traceback_text, target="cad"):
     """Send failing code + its traceback back to the AI for repair."""
@@ -206,6 +227,11 @@ ERROR TRACEBACK:
 Rewrite the COMPLETE corrected script. Follow all the same rules as before.
 Fix the root cause of the error — do not just suppress it. Output only the code block."""
 
+    standards = load_drafting_standards()
+    if standards:
+        fix_request += (
+            "\n\n=== MANDATORY ARCHITECTURAL STANDARDS (Neufert + NBC 2016) ===\n" + standards
+        )
     return route_llm(fix_request, SYSTEM_PROMPTS.get(target, CAD_PROMPT))
 
 def execute_generated_script(target, script_code):
