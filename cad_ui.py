@@ -2,13 +2,15 @@ import sys
 import os
 import subprocess
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QRadioButton, QButtonGroup, QFrame, QSplitter
 )
 from PyQt6.QtGui import QFont, QColor, QPalette
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QProcess
 
 from cad_agent import get_ai_response
+
+SKETCHUP_EXE = r"C:\Program Files\SketchUp\SketchUp 2025\SketchUp.exe"
 
 # --- Color Palette ---
 BG_COLOR = "#0a0e14"
@@ -22,7 +24,7 @@ class AEC_Orchestrator(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AEC Orchestrator — Generative CAD Bridge")
-        self.setMinimumSize(1000, 650)
+        self.setMinimumSize(1000, 700)
         self.setStyleSheet(f"background-color: {BG_COLOR}; color: {TEXT_COLOR};")
 
         # Main Layout
@@ -48,7 +50,7 @@ class AEC_Orchestrator(QMainWindow):
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 10, 0)
-        
+
         # 1. Target Software Selector
         target_label = QLabel("TARGET SOFTWARE:")
         target_label.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
@@ -56,7 +58,7 @@ class AEC_Orchestrator(QMainWindow):
 
         self.btn_group = QButtonGroup(self)
         targets = [("AutoCAD (2D)", "cad"), ("SketchUp (Ruby)", "sketchup"), ("Rhino 8 (3D)", "rhino")]
-        
+
         radio_layout = QHBoxLayout()
         for text, value in targets:
             rb = QRadioButton(text)
@@ -141,6 +143,23 @@ class AEC_Orchestrator(QMainWindow):
         self.btn_execute.clicked.connect(self.execute_script)
         right_layout.addWidget(self.btn_execute)
 
+        # 3. Execution Output Console
+        output_label = QLabel("EXECUTION OUTPUT:")
+        output_label.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        right_layout.addWidget(output_label)
+
+        self.output_console = QTextEdit()
+        self.output_console.setReadOnly(True)
+        self.output_console.setFont(QFont("Courier New", 9))
+        self.output_console.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #05080c; color: #9ca3af;
+                border: 1px solid {BORDER_COLOR}; border-radius: 5px;
+                padding: 10px;
+            }}
+        """)
+        right_layout.addWidget(self.output_console)
+
         splitter.addWidget(right_panel)
         splitter.setSizes([400, 600])
 
@@ -185,35 +204,63 @@ class AEC_Orchestrator(QMainWindow):
         self.code_editor.setPlainText(f"# [!] AI generation failed:\n# {error}")
 
     def execute_script(self):
-        """Replaces magic.py logic. Saves the code to a file and launches the subprocess."""
+        """Save the code and run it, streaming output into the console."""
         target = self.btn_group.checkedButton().objectName()
         code = self.code_editor.toPlainText().strip()
-        
+
         if not code:
             return
 
         # Guard: refuse to run raw prompt text (no code structure) as a script
-        if target != "sketchup" and not any(
-            token in code for token in ("import", "def ", "print", "=", "(", "puts")
-        ):
-            self.code_editor.setPlainText(
-                "# [!] That doesn't look like generated code.\n"
-                "# Click 'GENERATE SCRIPT' first, then 'BUILD IN SOFTWARE'."
+        if not any(token in code for token in ("import", "def ", "print", "puts", "entities", "model")):
+            self.output_console.setPlainText(
+                "[!] That doesn't look like generated code.\n"
+                "    Click 'GENERATE SCRIPT' first, then 'BUILD IN SOFTWARE'."
             )
             return
 
+        self.btn_execute.setEnabled(False)
+        self.btn_execute.setText("◌ RUNNING...")
+        self.output_console.setPlainText(f"[*] Building in {target.upper()}...\n")
+
+        script_file = {"cad": "run_cad.py", "rhino": "run_rhino.py", "sketchup": "run_sketchup.rb"}[target]
+        with open(script_file, "w") as f:
+            f.write(code)
+
         if target == "sketchup":
-            with open("run_sketchup.rb", "w") as f: f.write(code)
-            # Update path to match your installation
-            subprocess.Popen([r"C:\Program Files\SketchUp\SketchUp 2025\SketchUp.exe", "-RubyStartup", "run_sketchup.rb"])
-        
-        elif target == "rhino":
-            with open("run_rhino.py", "w") as f: f.write(code)
-            subprocess.Popen([sys.executable, "run_rhino.py"])
-            
-        elif target == "cad":
-            with open("run_cad.py", "w") as f: f.write(code)
-            subprocess.Popen([sys.executable, "run_cad.py"])
+            # SketchUp must be launched as an app with the Ruby startup file
+            try:
+                subprocess.Popen([SKETCHUP_EXE, "-RubyStartup", script_file])
+                self.output_console.append("[+] SketchUp launched with script. Check the SketchUp window.")
+            except Exception as e:
+                self.output_console.append(f"[!] Failed to launch SketchUp: {e}\n(Update SKETCHUP_EXE path if needed)")
+            self._reset_execute_button()
+            return
+
+        # Python targets (cad / rhino): run via QProcess, stream output live
+        self.runner = QProcess(self)
+        self.runner.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        self.runner.readyReadStandardOutput.connect(self._on_runner_output)
+        self.runner.finished.connect(self._on_runner_finished)
+        self.runner.start(sys.executable, [script_file])
+
+    def _on_runner_output(self):
+        text = bytes(self.runner.readAllStandardOutput()).decode(errors="replace")
+        self.output_console.append(text)
+
+    def _on_runner_finished(self, exit_code, _status):
+        if exit_code == 0:
+            self.output_console.append("\n[+] Build finished successfully.")
+        else:
+            self.output_console.append(
+                f"\n[!] Build failed with exit code {exit_code}. "
+                "Make sure the CAD software is installed and running."
+            )
+        self._reset_execute_button()
+
+    def _reset_execute_button(self):
+        self.btn_execute.setEnabled(True)
+        self.btn_execute.setText("⚡ BUILD IN SOFTWARE")
 
 class AIWorker(QThread):
     """Runs the LLM fallback chain off the UI thread."""
