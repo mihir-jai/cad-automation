@@ -91,6 +91,36 @@ MANDATORY GRID-PACKING ALGORITHM:
     For irregular room sizes, keep the same principle: derive every coordinate from
     arithmetic on plot dimensions — never from imagination.
 
+PROFESSIONAL DRAFTING RULES (match real architectural drawings, not sketches):
+20. DOUBLE-LINE WALLS: Never draw single lines for walls. Always draw an OUTER polyline and an
+    INNER polyline offset by the wall thickness (6-9 inches, i.e. 0.5-0.75 ft). Example helper:
+
+    def draw_wall(x1, y1, x2, y2, thickness=0.5):
+        \"\"\"Draw a double-line wall between two points.\"\"\"
+        if x1 == x2:  # vertical wall
+            ms.AddPolyline(aDouble(x1, y1, 0, x2, y2, 0, x2, y2, 0))
+            ms.AddLine(pt(x1, y1), pt(x2, y2))
+            ms.AddLine(pt(x1 + thickness, y1), pt(x2 + thickness, y2))
+            ms.AddLine(pt(x1, y1), pt(x1 + thickness, y1))
+            ms.AddLine(pt(x2, y2), pt(x2 + thickness, y2))
+        else:         # horizontal wall
+            ms.AddLine(pt(x1, y1), pt(x2, y2))
+            ms.AddLine(pt(x1, y1 + thickness), pt(x2, y2 + thickness))
+            ms.AddLine(pt(x1, y1), pt(x1, y1 + thickness))
+            ms.AddLine(pt(x2, y2), pt(x2, y2 + thickness))
+    Fill the wall cavity with solid hatching (ms.AddHatch) only if the user requests it.
+21. DOOR OPENINGS: Do not draw continuous closed loops for internal rooms. When two connecting
+    rooms share a wall, leave a 3-foot gap in the wall coordinates for the doorway. Optionally
+    draw the door swing as a simple 90-degree arc (ms.AddArc) plus a straight door leaf line.
+22. PROPORTIONAL SIZING: Apply strict logical ratios to room subdivisions. A bathroom/toilet
+    must be approximately 20-30% the size of a living hall or bedroom. Kitchens ~40-50% of a
+    bedroom. Never make a bathroom larger than the room it serves.
+23. CLEAN TEXT ANCHORING: Calculate the absolute mathematical center (X, Y) of each room's
+    bounding box and set text height to room_width * 0.15 — readable but never bleeding
+    through the walls into neighboring rooms.
+24. ORTHOGONAL ENFORCEMENT: Force all coordinate generation to snap to 90-degree angles.
+    Reject any polar or radial math for standard room generation.
+
 
 Here is the mandatory boilerplate you MUST use:
 
