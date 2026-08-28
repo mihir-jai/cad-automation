@@ -30,6 +30,22 @@ CRITICAL COM STABILITY RULES:
     every call site MUST match the function signature exactly (correct number and order of
     arguments). Double-check every function call before finishing.
 
+TEXT & LAYOUT RULES (critical — these cause visually broken drawings):
+11. NEVER use text.Alignment = 3 — that is acAlignmentAligned, which STRETCHES text from its
+    position to a secondary alignment point (defaulting to origin 0,0,0), producing giant
+    rotated text across the drawing. For centered room labels use:
+        text = ms.AddText(name, pt(cx, cy), height)
+        text.Alignment = 10                      # acAlignmentMiddleCenter
+        text.TextAlignmentPoint = pt(cx, cy)     # MUST be set after Alignment
+12. Text height MUST match the drawing's unit scale. If drawing in inches (e.g. 50*12 = 600
+    units), use a height around 15-20. If drawing in feet, use 2-3. A height of 1.0 is
+    microscopic on large plots.
+13. For multi-floor plans, place floors SIDE-BY-SIDE along the X-axis (offset the second floor
+    by plot_width + gap), NEVER stacked on the Y-axis — the ground floor often extends further
+    than assumed and floors will overlap.
+14. Decide the unit system ONCE at the top (e.g. UNITS = 12 for inches) and use it consistently
+    for every coordinate, wall thickness, and text height.
+
 
 Here is the mandatory boilerplate you MUST use:
 
