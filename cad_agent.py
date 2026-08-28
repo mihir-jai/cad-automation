@@ -60,6 +60,37 @@ SPATIAL REASONING RULES (critical — these prevent geometric nonsense):
 18. Never place a room's center outside the plot boundary, and never let a room extend past
     the plot edges.
 
+MANDATORY GRID-PACKING ALGORITHM:
+19. When tasked with floor plans, YOU MUST NOT invent your own coordinates. You must use a
+    grid-packing approach: divide the plot_width and plot_depth by the number of required
+    rooms to create an orthogonal matrix of coordinates. Calculate text height dynamically
+    as room_width * 0.1 and place the text at the exact mathematical center of each
+    rectangular room. Copy and adapt this EXACT helper into your script:
+
+    def grid_pack(plot_w, plot_d, rooms_per_row, room_names, color=3):
+        \"\"\"Divide the plot into an orthogonal grid of rooms with centered labels.\"\"\"
+        room_w = plot_w / rooms_per_row
+        room_d = plot_d / ((len(room_names) + rooms_per_row - 1) // rooms_per_row)
+        text_h = room_w * 0.1
+        for i, name in enumerate(room_names):
+            col, row = i % rooms_per_row, i // rooms_per_row
+            x1, y1 = col * room_w, row * room_d
+            x2, y2 = x1 + room_w, y1 + room_d
+            pline = ms.AddPolyline(aDouble(
+                x1, y1, 0,  x2, y1, 0,  x2, y2, 0,  x1, y2, 0,  x1, y1, 0))
+            pline.Closed = True
+            pline.Color = color
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0   # exact mathematical center
+            txt = ms.AddText(name, pt(cx, cy), text_h)
+            txt.Alignment = 10
+            txt.TextAlignmentPoint = pt(cx, cy)
+
+    Usage example for a 50x79 ft plot with 7 rooms (3 per row):
+        grid_pack(50, 79, 3, ["Living", "Kitchen", "Bath",
+                              "BHK1", "BHK2", "BHK3", "BHK4"])
+    For irregular room sizes, keep the same principle: derive every coordinate from
+    arithmetic on plot dimensions — never from imagination.
+
 
 Here is the mandatory boilerplate you MUST use:
 
