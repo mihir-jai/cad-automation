@@ -17,9 +17,12 @@ from pyautocad import Autocad, APoint, aDouble
 class ArchitecturalDrafter:
     """All AutoCAD geometry math wrapped so the AI never calls ms.* directly."""
 
-    def __init__(self, acad, ms):
-        self.acad = acad
-        self.ms = ms
+    def __init__(self, acad=None, ms=None):
+        # Tolerant of no-arg instantiation (LLMs often write
+        # d = ArchitecturalDrafter()) — fall back to the module-level
+        # connection objects created by the boilerplate below.
+        self.acad = acad if acad is not None else globals().get('acad')
+        self.ms = ms if ms is not None else globals().get('ms')
         self._labeled = set()       # room-name dedup -> one label per room
         self._drawn_walls = set()   # shared-wall dedup (rounded coord key)
 
@@ -58,11 +61,14 @@ class ArchitecturalDrafter:
         self.ms.AddPolyline(coords).Closed = True
 
     # --- room: 4 double-line walls + centered, deduplicated label ---
-    def draw_room(self, x_min, y_min, x_max, y_max, name=None, thickness=4.5):
-        self.draw_wall(x_min, y_min, x_max, y_min, thickness)   # bottom
-        self.draw_wall(x_max, y_min, x_max, y_max, thickness)   # right
-        self.draw_wall(x_max, y_max, x_min, y_max, thickness)   # top
-        self.draw_wall(x_min, y_max, x_min, y_min, thickness)   # left
+    def draw_room(self, x_min, y_min, x_max, y_max, name=None,
+                  thickness=4.5, wall_thickness=None):
+        # accept either kwarg name (LLMs use both)
+        t = wall_thickness if wall_thickness is not None else thickness
+        self.draw_wall(x_min, y_min, x_max, y_min, t)   # bottom
+        self.draw_wall(x_max, y_min, x_max, y_max, t)   # right
+        self.draw_wall(x_max, y_max, x_min, y_max, t)   # top
+        self.draw_wall(x_min, y_max, x_min, y_min, t)   # left
         if name:
             self.draw_room_text(name, x_min, y_min, x_max, y_max)
 
@@ -80,8 +86,16 @@ class ArchitecturalDrafter:
         t.TextAlignmentPoint = self.pt(cx, cy)
 
     # --- door: 36-inch gap in the wall + 90-degree swing arc ---
-    def draw_door(self, x, y, rotation=0, door_width=36):
-        """Create a doorway. rotation: 0=horizontal wall, 90=vertical wall."""
+    def draw_door(self, x, y, rotation=0, door_width=36,
+                  width=None, horizontal=None):
+        """Create a doorway. Accepts flexible kwargs (LLMs use varied names):
+        rotation: 0=horizontal wall, 90=vertical wall
+        horizontal=True -> rotation 0, horizontal=False -> rotation 90
+        width -> door_width"""
+        if width is not None:
+            door_width = width
+        if horizontal is not None:
+            rotation = 0 if horizontal else 90
         half = door_width / 2.0
         hinge = self.pt(x - half, y) if rotation == 0 else self.pt(x, y - half)
 

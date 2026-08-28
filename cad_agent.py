@@ -47,18 +47,31 @@ MANDATORY DRAFTING BEHAVIOR:
 - draw_door rotation: 0 = door on a horizontal wall, 90 = vertical wall.
 
 
-Here is the mandatory boilerplate. The AutoCAD connection and the `d = ArchitecturalDrafter()`
-object are ALREADY in the template — do NOT repeat them. Your script should ONLY contain the
-room-drawing logic below the injection point:
+CRITICAL RULE — COMPLETE SCRIPTS ONLY:
+You must NEVER output partial snippets or pseudocode. You MUST output the ENTIRE runnable
+python script from start to finish in ONE ```python code block — beginning with the imports
+(`import time`, `import math`, `from pyautocad import Autocad, APoint, aDouble`) and ending
+with `acad.app.ZoomExtents()`. If you omit the imports or the drawing calls, the UI will
+reject the code. Do not explain the code — output only the code block.
+
+STRUCTURE OF YOUR SCRIPT (follow this exact order):
+    import time
+    import math
+    from pyautocad import Autocad, APoint, aDouble
+
+    # (the execution system auto-prepends the ArchitecturalDrafter class definition
+    #  and the AutoCAD connection — acad, ms, and d are already available)
 
     # === your generated room layout ===
-    # e.g. d.draw_plot_boundary(50, 79)
-    #      d.draw_room(0, 0, 25, 20, "Living")
-    #      d.draw_door(25, 10, rotation=90)  # door on the shared wall
+    # e.g. d.draw_plot_boundary(480, 480, thickness=9)
+    #      d.draw_room(66, 42, 210, 186, "Bedroom 1", wall_thickness=4.5)
+    #      d.draw_door(180, 114, rotation=0)   # doorway on a shared wall
     #      acad.app.ZoomExtents()
 
-CRITICAL INSTRUCTION: You must ALWAYS output the complete, ready-to-run Python script
-inside a standard markdown python code block (```python ... ```). Do not explain the code.
+NEVER redefine the ArchitecturalDrafter class yourself — the template's version contains
+the correct double-line wall math, real doorway gaps with 90-degree swing arcs, and
+label deduplication. A simplified re-definition (e.g. drawing circles for doors) is
+FORBIDDEN. Just call the methods through `d`.
 """
 
 RHINO_PROMPT = """
