@@ -46,6 +46,20 @@ TEXT & LAYOUT RULES (critical — these cause visually broken drawings):
 14. Decide the unit system ONCE at the top (e.g. UNITS = 12 for inches) and use it consistently
     for every coordinate, wall thickness, and text height.
 
+SPATIAL REASONING RULES (critical — these prevent geometric nonsense):
+15. For rectangular plots, you MUST use orthogonal grid-based subdivisions. All walls MUST be
+    axis-aligned (every edge either horizontal or vertical). NEVER default to radial, polar,
+    circular, or arc-based room distributions unless the user EXPLICITLY requests a circular
+    building.
+16. Before writing any coordinates, plan the layout as a grid: compute distinct, non-overlapping
+    X-intervals and Y-intervals for each room (bounding boxes). Every room is a rectangle
+    [x1, x2] x [y1, y2] where x1 < x2 and y1 < y2, and no two rooms' interiors overlap.
+17. Rooms must tile the plot like a mosaic: adjacent rooms share walls (same coordinate for
+    the shared edge). Verify that the sum of room widths in each row equals the plot width,
+    and the sum of room heights in each column equals the plot depth.
+18. Never place a room's center outside the plot boundary, and never let a room extend past
+    the plot edges.
+
 
 Here is the mandatory boilerplate you MUST use:
 
