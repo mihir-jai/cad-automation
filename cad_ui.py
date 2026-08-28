@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont, QColor, QPalette
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QProcess
 
-from cad_agent import get_ai_response
+from cad_agent import get_ai_response, fix_code_with_error
 
 SKETCHUP_EXE = r"C:\Program Files\SketchUp\SketchUp 2025\SketchUp.exe"
 
@@ -179,6 +179,21 @@ class AEC_Orchestrator(QMainWindow):
         self.btn_stop.setEnabled(False)
         right_layout.addWidget(self.btn_stop)
 
+        # 2c. Auto-Fix & Retry Button (appears useful after a failed build)
+        self.btn_autofix = QPushButton("🔧 AUTO-FIX & RETRY")
+        self.btn_autofix.setFixedHeight(32)
+        self.btn_autofix.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self.btn_autofix.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {PANEL_COLOR}; color: #ffaa00;
+                border: 1px solid #ffaa00; border-radius: 5px;
+            }}
+            QPushButton:hover {{ background-color: #2a1f00; }}
+        """)
+        self.btn_autofix.clicked.connect(self.autofix_and_retry)
+        self.btn_autofix.setEnabled(False)
+        right_layout.addWidget(self.btn_autofix)
+
         # 3. Execution Output Console
         output_label = QLabel("EXECUTION OUTPUT:")
         output_label.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
@@ -281,6 +296,9 @@ class AEC_Orchestrator(QMainWindow):
         self.runner.finished.connect(self._on_runner_finished)
         self.runner.start(sys.executable, [script_file])
         self.btn_stop.setEnabled(True)
+        self._last_code = code
+        self._last_target = target
+        self._last_output = ""
 
     def abort_execution(self):
         """Kill a frozen CAD subprocess."""
@@ -312,21 +330,81 @@ class AEC_Orchestrator(QMainWindow):
     def _on_runner_output(self):
         text = bytes(self.runner.readAllStandardOutput()).decode(errors="replace")
         self.output_console.append(text)
+        self._last_output += text
 
     def _on_runner_finished(self, exit_code, _status):
         if exit_code == 0:
             self.output_console.append("\n[+] Build finished successfully.")
+            self.btn_autofix.setEnabled(False)
         else:
             self.output_console.append(
                 f"\n[!] Build failed with exit code {exit_code}. "
-                "Make sure the CAD software is installed and running."
+                "Click 'AUTO-FIX & RETRY' to let the AI repair the script."
             )
+            self.btn_autofix.setEnabled(True)
         self._reset_execute_button()
+
+    def autofix_and_retry(self):
+        """Send the failing code + traceback to the AI, then re-run the fix."""
+        if not getattr(self, "_last_code", None):
+            return
+
+        self.btn_autofix.setEnabled(False)
+        self.btn_autofix.setText("◌ FIXING...")
+        self.output_console.append("\n[*] Sending error to AI for repair...")
+
+        self.fixer = FixWorker(self._last_code, self._last_output[-3000:], self._last_target)
+        self.fixer.finished_signal.connect(self._on_fix_finished)
+        self.fixer.error_signal.connect(self._on_fix_error)
+        self.fixer.start()
+
+    def _on_fix_finished(self, fixed_code):
+        self.btn_autofix.setText("🔧 AUTO-FIX & RETRY")
+        self.code_editor.setPlainText(fixed_code)
+        self.output_console.append("[+] AI produced a corrected script. Re-running...\n")
+        self.execute_script()
+
+    def _on_fix_error(self, error):
+        self.btn_autofix.setText("🔧 AUTO-FIX & RETRY")
+        self.btn_autofix.setEnabled(True)
+        self.output_console.append(f"[!] Auto-fix failed: {error}")
 
     def _reset_execute_button(self):
         self.btn_execute.setEnabled(True)
         self.btn_execute.setText("⚡ BUILD IN SOFTWARE")
         self.btn_stop.setEnabled(False)
+
+class FixWorker(QThread):
+    """Runs the AI auto-repair off the UI thread."""
+    finished_signal = pyqtSignal(str)
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, code, traceback_text, target):
+        super().__init__()
+        self.code = code
+        self.traceback_text = traceback_text
+        self.target = target
+
+    def run(self):
+        try:
+            response = fix_code_with_error(self.code, self.traceback_text, self.target)
+            if response is None:
+                self.error_signal.emit("All AI providers failed.")
+                return
+            code = None
+            if "```python" in response:
+                code = response.split("```python")[1].split("```")[0].strip()
+            elif "```ruby" in response:
+                code = response.split("```ruby")[1].split("```")[0].strip()
+            elif "```" in response:
+                code = response.split("```")[1].split("```")[0].strip()
+            if code:
+                self.finished_signal.emit(code)
+            else:
+                self.error_signal.emit("Could not extract code from AI response.")
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
 
 class AIWorker(QThread):
     """Runs the LLM fallback chain off the UI thread."""

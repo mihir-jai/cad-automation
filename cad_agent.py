@@ -26,6 +26,9 @@ CRITICAL COM STABILITY RULES:
 7. NEVER attempt to set `Lineweight` or `Linetype` (like 'Dashed'). Instead, use `.Color` (e.g., 1=Red, 2=Yellow, 3=Green).
 8. Import aDouble alongside APoint: `from pyautocad import Autocad, APoint, aDouble`
 9. NEVER pass a list of APoint objects to ms.AddPolyline — only aDouble with flat coordinates.
+10. PREFER A SIMPLE LINEAR SCRIPT over complex abstractions. If you define helper functions,
+    every call site MUST match the function signature exactly (correct number and order of
+    arguments). Double-check every function call before finishing.
 
 
 Here is the mandatory boilerplate you MUST use:
@@ -94,6 +97,25 @@ SYSTEM_PROMPTS = {"cad": CAD_PROMPT, "rhino": RHINO_PROMPT, "sketchup": SKETCHUP
 def get_ai_response(user_input, target="cad"):
     """Query AI providers via the direct HTTP router (llm_router.py)."""
     return route_llm(user_input, SYSTEM_PROMPTS.get(target, CAD_PROMPT))
+
+def fix_code_with_error(code, traceback_text, target="cad"):
+    """Send failing code + its traceback back to the AI for repair."""
+    fix_request = f"""The following {target} script failed during execution.
+
+SCRIPT:
+```python
+{code}
+```
+
+ERROR TRACEBACK:
+```
+{traceback_text}
+```
+
+Rewrite the COMPLETE corrected script. Follow all the same rules as before.
+Fix the root cause of the error — do not just suppress it. Output only the code block."""
+
+    return route_llm(fix_request, SYSTEM_PROMPTS.get(target, CAD_PROMPT))
 
 def execute_generated_script(target, script_code):
     """Execute generated CAD script in target environment."""
