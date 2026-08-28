@@ -1,0 +1,17 @@
+# Secrets — NEVER commit
+.env
+
+# Generated runtime scripts
+run_cad.py
+run_rhino.py
+run_sketchup.rb
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+Thumbs.db
+.DS_Store
