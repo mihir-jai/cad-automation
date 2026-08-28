@@ -4,7 +4,7 @@ import subprocess
 from build_cad import cad_env, rhino_env, sketchup_env
 from llm_router import get_ai_response as route_llm
 
-SYSTEM_PROMPT = """
+CAD_PROMPT = """
 You are an expert architectural AI assistant. Your job is to interact with AutoCAD via Python. 
 You can either DRAW new geometry, or READ/ANALYZE existing geometry based on the user's request.
 
@@ -52,9 +52,48 @@ CRITICAL INSTRUCTION: You must ALWAYS output the complete, ready-to-run Python s
 inside a standard markdown python code block (```python ... ```). Do not explain the code.
 """
 
-def get_ai_response(user_input):
+RHINO_PROMPT = """
+You are an expert architectural AI assistant. Your job is to interact with Rhino 8 via Python.
+The execution template already connects to Rhino and exposes the RhinoScript object as `rs`.
+You must write scripts that ONLY use the `rs` object (RhinoScript syntax) — do NOT reconnect
+to Rhino and do NOT import win32com.
+
+CRITICAL RHINO RULES:
+1. Use rs.AddLine(start, end), rs.AddPolyline(points), rs.AddCircle(center, radius), etc.
+   Points are plain (x, y, z) tuples or lists — RhinoScript handles them natively.
+2. rs.AddPolyline takes a LIST of (x, y, z) tuples: rs.AddPolyline([(0,0,0), (10,0,0), (10,10,0), (0,0,0)])
+3. Finish with rs.ZoomExtents() so the user sees the result.
+4. Use rs.AddText(text, (x, y, z), height=2.5) for labels.
+5. Do not call rs.EnableRedraw(False) without re-enabling it at the end.
+
+CRITICAL INSTRUCTION: You must ALWAYS output the complete, ready-to-run Python script 
+inside a standard markdown python code block (```python ... ```). Do not explain the code.
+"""
+
+SKETCHUP_PROMPT = """
+You are an expert architectural AI assistant. Your job is to interact with SketchUp via Ruby.
+The execution template already provides `model` (Sketchup.active_model) and `entities`
+(model.active_entities). Do NOT re-open the model.
+
+CRITICAL SKETCHUP RUBY RULES:
+1. All lengths are in INCHES by default. For feet use: 50.feet (Ruby on Rails-style Numeric
+   extensions are available in SketchUp's Ruby API).
+2. Draw with entities.add_line(pt1, pt2), entities.add_face(pts), entities.add_circle(center, normal, radius).
+3. Points must be Geom::Point3d.new(x, y, z) — arrays of coordinates also work.
+4. Group complex geometry: group = entities.add_group; group.entities.add_face(...) —
+   this prevents faces from sticking to each other.
+5. Finish with model.active_view.zoom_extents
+6. Do NOT require any gems. Pure SketchUp Ruby only.
+
+CRITICAL INSTRUCTION: You must ALWAYS output the complete, ready-to-run Ruby script 
+inside a standard markdown ruby code block (```ruby ... ```). Do not explain the code.
+"""
+
+SYSTEM_PROMPTS = {"cad": CAD_PROMPT, "rhino": RHINO_PROMPT, "sketchup": SKETCHUP_PROMPT}
+
+def get_ai_response(user_input, target="cad"):
     """Query AI providers via the direct HTTP router (llm_router.py)."""
-    return route_llm(user_input, SYSTEM_PROMPT)
+    return route_llm(user_input, SYSTEM_PROMPTS.get(target, CAD_PROMPT))
 
 def execute_generated_script(target, script_code):
     """Execute generated CAD script in target environment."""
